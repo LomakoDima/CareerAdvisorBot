@@ -5,10 +5,11 @@ from aiogram.filters import CommandStart, Command
 from .keyboards import *
 from .professions import PROFESSIONS, get_profession_by_preferences, get_profession_stats
 from .ai_service import get_ai_career_recommendation, is_openai_available
+from .profile_service import ProfileService
 import json
 import time
 import random
-
+from datetime import datetime
 
 class CareerStates(StatesGroup):
     main_menu = State()
@@ -22,6 +23,158 @@ class CareerStates(StatesGroup):
 
 
 def register_handlers(dp, bot):
+    @dp.message(CareerStates.main_menu)
+    async def handle_main_menu(message: types.Message, state: FSMContext):
+        text = message.text
+
+        if "🎯 Пройти тест" in text:
+            await choose_test_mode(message, state)
+        elif "📊 Топ профессий" in text:
+            await show_top_professions(message, state)
+        elif "💰 По зарплате" in text:
+            await show_salary_filter(message, state)
+        elif "👤 Личный кабинет" in text:  # НОВОЕ
+            await show_profile(message, state)
+        elif "📚 Полезное" in text:
+            await show_useful_info(message, state)
+        elif "ℹ️ О боте" in text:
+            await show_about(message, state)
+
+    async def show_profile(message: types.Message, state: FSMContext):
+        """Показать личный кабинет"""
+        user_id = str(message.from_user.id)
+        profile = ProfileService.get_user_profile(user_id)
+
+        # Базовая информация о профиле
+        username = message.from_user.first_name or "Пользователь"
+        created_date = datetime.fromisoformat(profile["created_at"]).strftime("%d.%m.%Y")
+
+        await message.answer(
+            f"👤 <b>Личный кабинет - {username}</b>\n\n"
+            f"📅 С нами с: {created_date}\n"
+            f"🎯 Тестов пройдено: {profile['stats']['total_tests']}\n"
+            f"🤖 ИИ-консультаций: {profile['stats']['ai_consultations']}\n"
+            f"⭐ Избранных профессий: {len(profile['favorites'])}\n\n"
+            f"Выбери действие:",
+            reply_markup=get_profile_kb(),
+            parse_mode="HTML"
+        )
+
+    # Callbacks для личного кабинета
+    @dp.callback_query(F.data == "profile_results")
+    async def show_profile_results(callback: types.CallbackQuery):
+        user_id = str(callback.from_user.id)
+        results_text = ProfileService.get_recent_results(user_id)
+        await callback.message.edit_text(results_text, parse_mode="HTML")
+
+    @dp.callback_query(F.data == "profile_stats")
+    async def show_profile_stats(callback: types.CallbackQuery):
+        user_id = str(callback.from_user.id)
+        stats_text = ProfileService.get_profile_stats(user_id)
+        await callback.message.edit_text(stats_text, parse_mode="HTML")
+
+    @dp.callback_query(F.data == "profile_favorites")
+    async def show_profile_favorites(callback: types.CallbackQuery):
+        user_id = str(callback.from_user.id)
+        favorites_text = ProfileService.get_favorites(user_id)
+        await callback.message.edit_text(favorites_text, parse_mode="HTML")
+
+    @dp.callback_query(F.data == "profile_clear")
+    async def clear_profile_data(callback: types.CallbackQuery):
+        user_id = str(callback.from_user.id)
+        ProfileService.clear_profile(user_id)
+        await callback.answer("🗑️ История очищена!")
+        await callback.message.edit_text(
+            "✅ <b>История очищена!</b>\n\n"
+            "Все результаты тестов и избранные профессии удалены.\n"
+            "Можешь начать заново! 🚀",
+            parse_mode="HTML"
+        )
+
+    @dp.callback_query(F.data == "add_favorite")
+    async def add_to_favorites(callback: types.CallbackQuery, state: FSMContext):
+        user_id = str(callback.from_user.id)
+        data = await state.get_data()
+
+        # Получаем текущие результаты
+        results = data.get("results", [])
+        if not results:
+            await callback.answer("❌ Нет результатов для добавления")
+            return
+
+        # Добавляем первую профессию в избранное
+        added = ProfileService.add_to_favorites(user_id, results[0])
+
+        if added:
+            await callback.answer("⭐ Добавлено в избранное!")
+        else:
+            await callback.answer("📝 Уже в избранном")
+
+    # Обновляем сохранение результатов классического теста
+    async def show_classic_results(message: types.Message, state: FSMContext):
+        data = await state.get_data()
+        professions = get_profession_by_preferences(
+            data["audience"], data["interest"],
+            data["with_people"], data["risk"]
+        )
+
+        if not professions:
+            await message.answer("😔 Не нашёл точных совпадений. Попробуй другие ответы!", reply_markup=get_final_kb())
+            return
+
+        await state.update_data(results=professions)
+
+        # НОВОЕ: Сохраняем в профиль
+        user_id = str(message.from_user.id)
+        ProfileService.save_test_result(user_id, "classic", professions, data)
+
+        result_text = f"🎉 <b>Твои идеальные профессии:</b>\n\n"
+        for i, prof in enumerate(professions[:2], 1):
+            result_text += f"<b>{i}. {prof['name']}</b>\n"
+            result_text += f"💰 {prof['salary']} | {prof['growth']}\n"
+            result_text += f"📋 {prof['desc']}\n\n"
+
+        await message.answer(result_text, reply_markup=get_final_kb(), parse_mode="HTML")
+        await state.set_state(CareerStates.show_results)
+
+    # Обновляем генерацию ИИ-рекомендаций
+    async def generate_ai_recommendations(message: types.Message, state: FSMContext):
+        typing_message = await message.answer("🤖 Анализирую нашу беседу и подбираю профессии...")
+
+        try:
+            data = await state.get_data()
+            context = data.get("ai_context", [])
+
+            if len(context) < 2:
+                await typing_message.delete()
+                await message.answer(
+                    "📝 Мне нужно больше информации о тебе! Расскажи подробнее о своих интересах, навыках и целях.",
+                    reply_markup=get_ai_chat_kb()
+                )
+                return
+
+            recommendations = await get_ai_career_recommendation(context, mode="recommend")
+            await typing_message.delete()
+            await state.update_data(ai_recommendations=recommendations)
+
+            # НОВОЕ: Сохраняем ИИ-сессию в профиль
+            user_id = str(message.from_user.id)
+            ProfileService.save_ai_session(user_id, data)
+
+            await message.answer(
+                f"🎉 <b>Персональные рекомендации от ИИ:</b>\n\n{recommendations}",
+                reply_markup=get_ai_results_kb(),
+                parse_mode="HTML"
+            )
+
+            await state.set_state(CareerStates.show_results)
+
+        except Exception as e:
+            await typing_message.delete()
+            await message.answer(
+                "😔 Произошла ошибка при генерации рекомендаций. Попробуй классический тест!",
+                reply_markup=get_mode_selection_kb(False)
+            )
     @dp.message(CommandStart())
     async def cmd_start(message: types.Message, state: FSMContext):
         await state.clear()
@@ -273,7 +426,6 @@ def register_handlers(dp, bot):
 
         await callback.message.edit_text(text, parse_mode="HTML")
 
-    # Callbacks для зарплат
     @dp.callback_query(F.data.startswith("salary_"))
     async def handle_salary_filter(callback: types.CallbackQuery):
         filter_type = callback.data.split("_")[1]
@@ -297,7 +449,6 @@ def register_handlers(dp, bot):
 
         await callback.message.edit_text(text, parse_mode="HTML")
 
-    # Callbacks для полезной информации
     @dp.callback_query(F.data.startswith("job_tips"))
     async def show_job_tips(callback: types.CallbackQuery):
         tips = [
@@ -336,7 +487,6 @@ def register_handlers(dp, bot):
             parse_mode="HTML"
         )
 
-    # Основная логика классического теста
     @dp.message(CareerStates.choosing_audience)
     async def process_audience(message: types.Message, state: FSMContext):
         if "⬅️" in message.text:
@@ -360,7 +510,13 @@ def register_handlers(dp, bot):
         if "⬅️" in message.text:
             return await start_classic_test(message, state)
 
-        valid_interests = ["💻 IT", "🎨 Искусство", "💼 Бизнес", "🏥 Медицина", "⚙️ Инженерия", "🏗️ Строительство"]
+        valid_interests = [
+            "💻 IT", "🎨 Искусство", "💼 Бизнес", "🏥 Медицина", "⚙️ Инженерия", "🏗️ Строительство",
+            "🍽️ Гостиницы и рестораны", "✈️ Транспорт", "📰 Медиа", "🏫 Образование", "🚚 Логистика",
+            "🔧 Техника", "🌱 Наука", "🎭 Искусство", "🌍 Наука", "🚆 Транспорт", "🚒 Службы",
+            "🌳 Сервис", "🍰 Гостиницы и рестораны", "⚗️ Наука", "🏋️ Спорт", "📬 Сервис",
+            "🚢 Транспорт", "🍣 Гостиницы и рестораны"
+        ]
         if message.text not in valid_interests:
             await message.answer("❌ Выбери из предложенных!", reply_markup=get_interest_kb())
             return
@@ -403,6 +559,14 @@ def register_handlers(dp, bot):
 
         await state.update_data(results=professions)
 
+        # ИСПРАВЛЕНИЕ: Сохраняем результат классического теста
+        user_id = str(message.from_user.id)
+        try:
+            ProfileService.save_test_result(user_id, "classic", professions, data)
+            print(f"✅ Классический тест сохранен для пользователя {user_id}")
+        except Exception as e:
+            print(f"❌ Ошибка сохранения классического теста: {e}")
+
         result_text = f"🎉 <b>Твои идеальные профессии:</b>\n\n"
         for i, prof in enumerate(professions[:2], 1):
             result_text += f"<b>{i}. {prof['name']}</b>\n"
@@ -412,7 +576,55 @@ def register_handlers(dp, bot):
         await message.answer(result_text, reply_markup=get_final_kb(), parse_mode="HTML")
         await state.set_state(CareerStates.show_results)
 
-    # Callbacks для результатов
+    async def generate_ai_recommendations(message: types.Message, state: FSMContext):
+        typing_message = await message.answer("🤖 Анализирую нашу беседу и подбираю профессии...")
+
+        try:
+            data = await state.get_data()
+            context = data.get("ai_context", [])
+
+            if len(context) < 2:
+                await typing_message.delete()
+                await message.answer(
+                    "📝 Мне нужно больше информации о тебе! Расскажи подробнее о своих интересах, навыках и целях.",
+                    reply_markup=get_ai_chat_kb()
+                )
+                return
+
+            recommendations = await get_ai_career_recommendation(context, mode="recommend")
+            await typing_message.delete()
+            await state.update_data(ai_recommendations=recommendations)
+
+            # ИСПРАВЛЕНИЕ: Сохраняем ИИ-сессию
+            user_id = str(message.from_user.id)
+            try:
+                # Подготавливаем данные сессии
+                session_data = {
+                    "context": context,
+                    "recommendations": recommendations,
+                    "timestamp": datetime.now().isoformat()
+                }
+                ProfileService.save_ai_session(user_id, session_data)
+                print(f"✅ ИИ-сессия сохранена для пользователя {user_id}")
+            except Exception as e:
+                print(f"❌ Ошибка сохранения ИИ-сессии: {e}")
+
+            await message.answer(
+                f"🎉 <b>Персональные рекомендации от ИИ:</b>\n\n{recommendations}",
+                reply_markup=get_ai_results_kb(),
+                parse_mode="HTML"
+            )
+
+            await state.set_state(CareerStates.show_results)
+
+        except Exception as e:
+            await typing_message.delete()
+            print(f"❌ Ошибка генерации ИИ-рекомендаций: {e}")
+            await message.answer(
+                "😔 Произошла ошибка при генерации рекомендаций. Попробуй классический тест!",
+                reply_markup=get_mode_selection_kb(False)
+            )
+
     @dp.callback_query(F.data == "details")
     async def show_details(callback: types.CallbackQuery, state: FSMContext):
         data = await state.get_data()
@@ -456,7 +668,6 @@ def register_handlers(dp, bot):
         await callback.answer("🔄 Перезапуск...")
         await cmd_start(callback.message, state)
 
-    # Новые callbacks для ИИ-режима
     @dp.callback_query(F.data == "ai_continue")
     async def ai_continue_chat(callback: types.CallbackQuery):
         await callback.message.edit_text(
@@ -474,7 +685,6 @@ def register_handlers(dp, bot):
             parse_mode="HTML"
         )
 
-    # Обработка команд
     @dp.message(Command("help"))
     async def cmd_help(message: types.Message):
         await message.answer(
@@ -511,7 +721,6 @@ def register_handlers(dp, bot):
             parse_mode="HTML"
         )
 
-    # Обработка неизвестных сообщений
     @dp.message()
     async def handle_unknown(message: types.Message, state: FSMContext):
         current_state = await state.get_state()

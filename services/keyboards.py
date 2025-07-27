@@ -1,17 +1,26 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 
 def get_main_menu_kb():
-    """Главное меню"""
     kb = ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="🎯 Пройти тест")],
         [KeyboardButton(text="📊 Топ профессий"), KeyboardButton(text="💰 По зарплате")],
-        [KeyboardButton(text="📚 Полезное"), KeyboardButton(text="ℹ️ О боте")]
+        [KeyboardButton(text="👤 Личный кабинет"), KeyboardButton(text="📚 Полезное")],
+        [KeyboardButton(text="ℹ️ О боте")]
     ], resize_keyboard=True)
     return kb
 
 
+def get_profile_kb():
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📊 Мои результаты", callback_data="profile_results")],
+        [InlineKeyboardButton(text="📈 Статистика тестов", callback_data="profile_stats")],
+        [InlineKeyboardButton(text="⭐ Избранные профессии", callback_data="profile_favorites")],
+        [InlineKeyboardButton(text="🗑️ Очистить историю", callback_data="profile_clear")]
+    ])
+    return kb
+
+
 def get_mode_selection_kb(ai_available=True):
-    """Выбор режима тестирования"""
     buttons = [
         [KeyboardButton(text="📋 Классический тест")]
     ]
@@ -28,7 +37,6 @@ def get_mode_selection_kb(ai_available=True):
 
 
 def get_ai_chat_kb():
-    """Клавиатура для ИИ-чата"""
     kb = ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="🎯 Получить рекомендации")],
         [KeyboardButton(text="⬅️ К выбору режима")]
@@ -37,9 +45,9 @@ def get_ai_chat_kb():
 
 
 def get_ai_results_kb():
-    """Клавиатура для результатов ИИ"""
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💬 Продолжить беседу", callback_data="ai_continue")],
+        [InlineKeyboardButton(text="⭐ Добавить в избранное", callback_data="add_favorite")],
         [InlineKeyboardButton(text="🆕 Новая консультация", callback_data="ai_new_chat")],
         [InlineKeyboardButton(text="💾 Сохранить", callback_data="save")],
         [InlineKeyboardButton(text="🔄 В главное меню", callback_data="restart")]
@@ -59,6 +67,15 @@ def get_interest_kb():
         [KeyboardButton(text="💻 IT"), KeyboardButton(text="🎨 Искусство")],
         [KeyboardButton(text="💼 Бизнес"), KeyboardButton(text="🏥 Медицина")],
         [KeyboardButton(text="⚙️ Инженерия"), KeyboardButton(text="🏗️ Строительство")],
+        [KeyboardButton(text="🍽️ Гостиницы и рестораны"), KeyboardButton(text="✈️ Транспорт")],
+        [KeyboardButton(text="📰 Медиа"), KeyboardButton(text="🏫 Образование")],
+        [KeyboardButton(text="🚚 Логистика"), KeyboardButton(text="🔧 Техника")],
+        [KeyboardButton(text="🌱 Наука"), KeyboardButton(text="🎭 Искусство")],
+        [KeyboardButton(text="🌍 Наука"), KeyboardButton(text="🚆 Транспорт")],
+        [KeyboardButton(text="🚒 Службы"), KeyboardButton(text="🌳 Сервис")],
+        [KeyboardButton(text="🍰 Гостиницы и рестораны"), KeyboardButton(text="⚗️ Наука")],
+        [KeyboardButton(text="🏋️ Спорт"), KeyboardButton(text="📬 Сервис")],
+        [KeyboardButton(text="🚢 Транспорт"), KeyboardButton(text="🍣 Гостиницы и рестораны")],
         [KeyboardButton(text="⬅️ Назад")]
     ], resize_keyboard=True, one_time_keyboard=True)
     return kb
@@ -82,6 +99,7 @@ def get_risk_kb():
 def get_final_kb():
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📋 Подробнее", callback_data="details")],
+        [InlineKeyboardButton(text="⭐ В избранное", callback_data="add_favorite")],
         [InlineKeyboardButton(text="📖 Где учиться", callback_data="courses")],
         [InlineKeyboardButton(text="💾 Сохранить", callback_data="save")],
         [InlineKeyboardButton(text="🔄 Заново", callback_data="restart")]
@@ -122,4 +140,3 @@ def get_useful_kb():
         [InlineKeyboardButton(text="🔗 Полезные сайты", callback_data="useful_sites")]
     ])
     return kb
-

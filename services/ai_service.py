@@ -5,7 +5,7 @@ from typing import List, Dict
 
 from dotenv import load_dotenv
 from openai import OpenAI
-from .professions import PROFESSIONS
+from .professions_service import professions_service
 
 load_dotenv()
 
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 class AICareerConsultant:
     def __init__(self):
-        self.model = "gpt-4o-mini"  # Новый API поддерживает gpt-4.1/gpt-4o
+        self.model = "gpt-4o-mini"
         self.max_tokens = 1000
         self.temperature = 0.7
 
@@ -25,7 +25,7 @@ class AICareerConsultant:
 
         Доступные профессии в базе данных:
         """
-        for prof in PROFESSIONS:
+        for prof in professions_service.get_all_professions():
             base_prompt += f"- {prof['name']} ({prof['category']}): {prof['desc'][:100]}...\n"
 
         if mode == "chat":
@@ -140,7 +140,7 @@ def extract_user_info_from_messages(messages: List[Dict]) -> Dict:
 
 async def enhance_ai_response(raw_response: str, context: List[Dict]) -> str:
     enhanced_response = raw_response
-    for profession in PROFESSIONS:
+    for profession in professions_service.get_all_professions():
         if profession['name'].lower() in raw_response.lower():
             additional_info = f"\n\n📋 <b>Дополнительно о профессии {profession['name']}:</b>\n"
             additional_info += f"💰 Зарплата: {profession['salary']}\n"

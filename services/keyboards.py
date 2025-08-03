@@ -15,6 +15,7 @@ def get_profile_kb():
         [InlineKeyboardButton(text="📊 Мои результаты", callback_data="profile_results")],
         [InlineKeyboardButton(text="📈 Статистика тестов", callback_data="profile_stats")],
         [InlineKeyboardButton(text="⭐ Избранные профессии", callback_data="profile_favorites")],
+        [InlineKeyboardButton(text="🏆 Достижения", callback_data="profile_achievements")],
         [InlineKeyboardButton(text="🗑️ Очистить историю", callback_data="profile_clear")]
     ])
     return kb

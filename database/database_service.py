@@ -9,19 +9,19 @@ logger = logging.getLogger(__name__)
 
 
 class DatabaseService:
-    """Сервис для работы с SQLite базой данных профилей пользователей"""
+
 
     def __init__(self, db_path: str = "user_profiles.db"):
         self.db_path = db_path
         self.init_database()
 
     def init_database(self):
-        """Инициализация базы данных при запуске бота"""
+
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
 
-                # Таблица профилей пользователей
+
                 cursor.execute('''
                     CREATE TABLE IF NOT EXISTS user_profiles (
                         user_id TEXT PRIMARY KEY,
@@ -32,7 +32,7 @@ class DatabaseService:
                     )
                 ''')
 
-                # Таблица результатов тестов
+
                 cursor.execute('''
                     CREATE TABLE IF NOT EXISTS test_results (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -45,7 +45,7 @@ class DatabaseService:
                     )
                 ''')
 
-                # Таблица ИИ-сессий
+
                 cursor.execute('''
                     CREATE TABLE IF NOT EXISTS ai_sessions (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -57,7 +57,7 @@ class DatabaseService:
                     )
                 ''')
 
-                # Таблица избранных профессий
+
                 cursor.execute('''
                     CREATE TABLE IF NOT EXISTS favorites (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -71,6 +71,37 @@ class DatabaseService:
                     )
                 ''')
 
+
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS achievements (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id TEXT NOT NULL,
+                        achievement_id TEXT NOT NULL,
+                        name TEXT NOT NULL,
+                        description TEXT NOT NULL,
+                        icon TEXT NOT NULL,
+                        category TEXT NOT NULL,
+                        unlocked_at TEXT NOT NULL,
+                        progress INTEGER DEFAULT 0,
+                        max_progress INTEGER DEFAULT 1,
+                        FOREIGN KEY (user_id) REFERENCES user_profiles (user_id),
+                        UNIQUE(user_id, achievement_id)
+                    )
+                ''')
+
+
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS achievement_progress (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id TEXT NOT NULL,
+                        achievement_id TEXT NOT NULL,
+                        current_progress INTEGER DEFAULT 0,
+                        last_updated TEXT NOT NULL,
+                        FOREIGN KEY (user_id) REFERENCES user_profiles (user_id),
+                        UNIQUE(user_id, achievement_id)
+                    )
+                ''')
+
                 conn.commit()
                 logger.info("✅ База данных SQLite инициализирована")
 
@@ -79,17 +110,14 @@ class DatabaseService:
             raise
 
     def get_user_profile(self, user_id: str) -> Dict:
-        """Получение профиля пользователя"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
 
-                # Проверяем, существует ли пользователь
                 cursor.execute('SELECT * FROM user_profiles WHERE user_id = ?', (user_id,))
                 profile_row = cursor.fetchone()
 
                 if not profile_row:
-                    # Создаем новый профиль
                     now = datetime.now().isoformat()
                     cursor.execute('''
                         INSERT INTO user_profiles (user_id, created_at, total_tests, ai_consultations, favorite_categories)
@@ -110,11 +138,9 @@ class DatabaseService:
                         "favorites": []
                     }
 
-                # Парсим существующий профиль
                 user_id_db, created_at, total_tests, ai_consultations, favorite_categories_json = profile_row
                 favorite_categories = json.loads(favorite_categories_json)
 
-                # Получаем результаты тестов
                 cursor.execute('''
                     SELECT date, test_type, results, preferences 
                     FROM test_results 
@@ -131,7 +157,6 @@ class DatabaseService:
                         "preferences": json.loads(row[3]) if row[3] else {}
                     })
 
-                # Получаем ИИ-сессии
                 cursor.execute('''
                     SELECT date, messages_count, recommendations 
                     FROM ai_sessions 
@@ -147,7 +172,6 @@ class DatabaseService:
                         "recommendations": row[2] or ""
                     })
 
-                # Получаем избранное
                 cursor.execute('''
                     SELECT name, category, salary, added_at 
                     FROM favorites 
@@ -179,7 +203,6 @@ class DatabaseService:
 
         except Exception as e:
             logger.error(f"❌ Ошибка получения профиля пользователя {user_id}: {e}")
-            # Возвращаем пустой профиль в случае ошибки
             return {
                 "user_id": user_id,
                 "created_at": datetime.now().isoformat(),
@@ -190,12 +213,10 @@ class DatabaseService:
             }
 
     def save_test_result(self, user_id: str, test_type: str, results: List[Dict], preferences: Dict = None):
-        """Сохранение результата теста"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
 
-                # Сохраняем результат теста
                 cursor.execute('''
                     INSERT INTO test_results (user_id, date, test_type, results, preferences)
                     VALUES (?, ?, ?, ?, ?)
@@ -207,14 +228,12 @@ class DatabaseService:
                     json.dumps(preferences or {}, ensure_ascii=False)
                 ))
 
-                # Обновляем статистику пользователя
                 cursor.execute('''
                     UPDATE user_profiles 
                     SET total_tests = total_tests + 1 
                     WHERE user_id = ?
                 ''', (user_id,))
 
-                # Обновляем любимые категории
                 cursor.execute('''
                     SELECT favorite_categories 
                     FROM user_profiles 
@@ -225,7 +244,6 @@ class DatabaseService:
                 if row:
                     favorite_categories = json.loads(row[0])
 
-                    # Добавляем категории из результатов
                     for prof in results[:2]:
                         category = prof.get("category", "Другое")
                         favorite_categories[category] = favorite_categories.get(category, 0) + 1
@@ -243,12 +261,10 @@ class DatabaseService:
             logger.error(f"❌ Ошибка сохранения результата теста для {user_id}: {e}")
 
     def save_ai_session(self, user_id: str, session_data: Dict):
-        """Сохранение ИИ-сессии"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
 
-                # Сохраняем ИИ-сессию
                 cursor.execute('''
                     INSERT INTO ai_sessions (user_id, date, messages_count, recommendations)
                     VALUES (?, ?, ?, ?)
@@ -259,7 +275,6 @@ class DatabaseService:
                     session_data.get("ai_recommendations", "")
                 ))
 
-                # Обновляем статистику ИИ-консультаций
                 cursor.execute('''
                     UPDATE user_profiles 
                     SET ai_consultations = ai_consultations + 1 
@@ -273,21 +288,18 @@ class DatabaseService:
             logger.error(f"❌ Ошибка сохранения ИИ-сессии для {user_id}: {e}")
 
     def add_to_favorites(self, user_id: str, profession: Dict) -> bool:
-        """Добавление профессии в избранное"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
 
-                # Проверяем, есть ли уже такая профессия в избранном
                 cursor.execute('''
                     SELECT COUNT(*) FROM favorites 
                     WHERE user_id = ? AND name = ?
                 ''', (user_id, profession["name"]))
 
                 if cursor.fetchone()[0] > 0:
-                    return False  # Уже в избранном
+                    return False
 
-                # Добавляем в избранное
                 cursor.execute('''
                     INSERT INTO favorites (user_id, name, category, salary, added_at)
                     VALUES (?, ?, ?, ?, ?)
@@ -308,17 +320,14 @@ class DatabaseService:
             return False
 
     def clear_profile(self, user_id: str):
-        """Очистка профиля пользователя"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
 
-                # Удаляем все связанные данные
                 cursor.execute('DELETE FROM test_results WHERE user_id = ?', (user_id,))
                 cursor.execute('DELETE FROM ai_sessions WHERE user_id = ?', (user_id,))
                 cursor.execute('DELETE FROM favorites WHERE user_id = ?', (user_id,))
 
-                # Сбрасываем статистику профиля
                 cursor.execute('''
                     UPDATE user_profiles 
                     SET total_tests = 0, ai_consultations = 0, favorite_categories = '{}' 
@@ -332,7 +341,6 @@ class DatabaseService:
             logger.error(f"❌ Ошибка очистки профиля {user_id}: {e}")
 
     def get_database_stats(self) -> Dict:
-        """Статистика базы данных"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
@@ -361,7 +369,6 @@ class DatabaseService:
             return {"total_users": 0, "total_tests": 0, "total_ai_sessions": 0, "total_favorites": 0}
 
     def backup_database(self, backup_path: str = None):
-        """Создание резервной копии базы данных"""
         if not backup_path:
             backup_path = f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
 
@@ -375,5 +382,280 @@ class DatabaseService:
             return None
 
 
-# Создаем глобальный экземпляр сервиса
+    def unlock_achievement(self, user_id: str, achievement_id: str, name: str, description: str, 
+                          icon: str, category: str, progress: int = 1, max_progress: int = 1) -> bool:
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                now = datetime.now().isoformat()
+
+                cursor.execute('''
+                    SELECT id FROM achievements 
+                    WHERE user_id = ? AND achievement_id = ?
+                ''', (user_id, achievement_id))
+                
+                if cursor.fetchone():
+                    return False
+
+                cursor.execute('''
+                    INSERT INTO achievements 
+                    (user_id, achievement_id, name, description, icon, category, unlocked_at, progress, max_progress)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (user_id, achievement_id, name, description, icon, category, now, progress, max_progress))
+                
+                conn.commit()
+                logger.info(f"🏆 Достижение разблокировано: {user_id} - {achievement_id}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"❌ Ошибка разблокировки достижения: {e}")
+            return False
+
+    def update_achievement_progress(self, user_id: str, achievement_id: str, progress: int, 
+                                  max_progress: int = None) -> bool:
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                now = datetime.now().isoformat()
+
+                cursor.execute('''
+                    INSERT OR REPLACE INTO achievement_progress 
+                    (user_id, achievement_id, current_progress, last_updated)
+                    VALUES (?, ?, ?, ?)
+                ''', (user_id, achievement_id, progress, now))
+
+                cursor.execute('''
+                    UPDATE achievements 
+                    SET progress = ?, max_progress = ?
+                    WHERE user_id = ? AND achievement_id = ?
+                ''', (progress, max_progress or progress, user_id, achievement_id))
+                
+                conn.commit()
+                return True
+                
+        except Exception as e:
+            logger.error(f"❌ Ошибка обновления прогресса: {e}")
+            return False
+
+    def get_user_achievements(self, user_id: str) -> List[Dict]:
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute('''
+                    SELECT achievement_id, name, description, icon, category, 
+                           unlocked_at, progress, max_progress
+                    FROM achievements 
+                    WHERE user_id = ?
+                    ORDER BY unlocked_at DESC
+                ''', (user_id,))
+                
+                achievements = []
+                for row in cursor.fetchall():
+                    achievements.append({
+                        'achievement_id': row[0],
+                        'name': row[1],
+                        'description': row[2],
+                        'icon': row[3],
+                        'category': row[4],
+                        'unlocked_at': row[5],
+                        'progress': row[6],
+                        'max_progress': row[7]
+                    })
+                
+                return achievements
+                
+        except Exception as e:
+            logger.error(f"❌ Ошибка получения достижений: {e}")
+            return []
+
+    def get_achievement_progress(self, user_id: str, achievement_id: str) -> Dict:
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute('''
+                    SELECT current_progress, last_updated
+                    FROM achievement_progress 
+                    WHERE user_id = ? AND achievement_id = ?
+                ''', (user_id, achievement_id))
+                
+                row = cursor.fetchone()
+                if row:
+                    return {
+                        'current_progress': row[0],
+                        'last_updated': row[1]
+                    }
+                return {'current_progress': 0, 'last_updated': None}
+                
+        except Exception as e:
+            logger.error(f"❌ Ошибка получения прогресса: {e}")
+            return {'current_progress': 0, 'last_updated': None}
+
+    def get_achievements_stats(self, user_id: str) -> Dict:
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+
+                cursor.execute('''
+                    SELECT COUNT(*) FROM achievements WHERE user_id = ?
+                ''', (user_id,))
+                total_achievements = cursor.fetchone()[0]
+
+                cursor.execute('''
+                    SELECT category, COUNT(*) 
+                    FROM achievements 
+                    WHERE user_id = ? 
+                    GROUP BY category
+                ''', (user_id,))
+                categories = dict(cursor.fetchall())
+
+                cursor.execute('''
+                    SELECT name, icon, unlocked_at 
+                    FROM achievements 
+                    WHERE user_id = ? 
+                    ORDER BY unlocked_at DESC 
+                    LIMIT 1
+                ''', (user_id,))
+                last_achievement = cursor.fetchone()
+                
+                return {
+                    'total_achievements': total_achievements,
+                    'categories': categories,
+                    'last_achievement': {
+                        'name': last_achievement[0],
+                        'icon': last_achievement[1],
+                        'unlocked_at': last_achievement[2]
+                    } if last_achievement else None
+                }
+                
+        except Exception as e:
+            logger.error(f"❌ Ошибка получения статистики достижений: {e}")
+            return {'total_achievements': 0, 'categories': {}, 'last_achievement': None}
+
 db_service = DatabaseService()
+
+def update_achievement_progress(self, user_id: str, achievement_id: str, progress: int, 
+                              max_progress: int = None) -> bool:
+    try:
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            now = datetime.now().isoformat()
+
+            cursor.execute('''
+                INSERT OR REPLACE INTO achievement_progress 
+                (user_id, achievement_id, current_progress, last_updated)
+                VALUES (?, ?, ?, ?)
+            ''', (user_id, achievement_id, progress, now))
+
+            cursor.execute('''
+                UPDATE achievements 
+                SET progress = ?, max_progress = ?
+                WHERE user_id = ? AND achievement_id = ?
+            ''', (progress, max_progress or progress, user_id, achievement_id))
+            
+            conn.commit()
+            return True
+            
+    except Exception as e:
+        logger.error(f"❌ Ошибка обновления прогресса: {e}")
+        return False
+
+def get_user_achievements(self, user_id: str) -> List[Dict]:
+    try:
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                SELECT achievement_id, name, description, icon, category, 
+                       unlocked_at, progress, max_progress
+                FROM achievements 
+                WHERE user_id = ?
+                ORDER BY unlocked_at DESC
+            ''', (user_id,))
+            
+            achievements = []
+            for row in cursor.fetchall():
+                achievements.append({
+                    'achievement_id': row[0],
+                    'name': row[1],
+                    'description': row[2],
+                    'icon': row[3],
+                    'category': row[4],
+                    'unlocked_at': row[5],
+                    'progress': row[6],
+                    'max_progress': row[7]
+                })
+            
+            return achievements
+            
+    except Exception as e:
+        logger.error(f"❌ Ошибка получения достижений: {e}")
+        return []
+
+def get_achievement_progress(self, user_id: str, achievement_id: str) -> Dict:
+    try:
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                SELECT current_progress, last_updated
+                FROM achievement_progress 
+                WHERE user_id = ? AND achievement_id = ?
+            ''', (user_id, achievement_id))
+            
+            row = cursor.fetchone()
+            if row:
+                return {
+                    'current_progress': row[0],
+                    'last_updated': row[1]
+                }
+            return {'current_progress': 0, 'last_updated': None}
+            
+    except Exception as e:
+        logger.error(f"❌ Ошибка получения прогресса: {e}")
+        return {'current_progress': 0, 'last_updated': None}
+
+def get_achievements_stats(self, user_id: str) -> Dict:
+    try:
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+
+            cursor.execute('''
+                SELECT COUNT(*) FROM achievements WHERE user_id = ?
+            ''', (user_id,))
+            total_achievements = cursor.fetchone()[0]
+
+            cursor.execute('''
+                SELECT category, COUNT(*) 
+                FROM achievements 
+                WHERE user_id = ? 
+                GROUP BY category
+            ''', (user_id,))
+            categories = dict(cursor.fetchall())
+
+            cursor.execute('''
+                SELECT name, icon, unlocked_at 
+                FROM achievements 
+                WHERE user_id = ? 
+                ORDER BY unlocked_at DESC 
+                LIMIT 1
+            ''', (user_id,))
+            last_achievement = cursor.fetchone()
+            
+            return {
+                'total_achievements': total_achievements,
+                'categories': categories,
+                'last_achievement': {
+                    'name': last_achievement[0],
+                    'icon': last_achievement[1],
+                    'unlocked_at': last_achievement[2]
+                } if last_achievement else None
+            }
+            
+    except Exception as e:
+        logger.error(f"❌ Ошибка получения статистики достижений: {e}")
+        return {'total_achievements': 0, 'categories': {}, 'last_achievement': None}

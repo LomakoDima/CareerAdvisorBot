@@ -3,9 +3,10 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import CommandStart, Command
 from .keyboards import *
-from .professions import PROFESSIONS, get_profession_by_preferences, get_profession_stats
+from .professions_service import professions_service
 from .ai_service import get_ai_career_recommendation, is_openai_available
 from .profile_service import ProfileService
+from .achievements_service import AchievementsService
 import json
 import time
 import random
@@ -23,6 +24,69 @@ class CareerStates(StatesGroup):
 
 
 def register_handlers(dp, bot):
+    @dp.callback_query(F.data == "resume_tips")
+    async def show_resume_tips(callback: types.CallbackQuery):
+        back_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад к полезному", callback_data="back_to_useful")]
+        ])
+
+        await callback.message.edit_text(
+            "📝 <b>Как составить эффективное резюме:</b>\n\n"
+            "📄 <b>Структура резюме:</b>\n"
+            "• Контактная информация\n"
+            "• Краткое описание (2-3 предложения)\n"
+            "• Опыт работы (в обратном порядке)\n"
+            "• Образование\n"
+            "• Ключевые навыки\n"
+            "• Дополнительная информация\n\n"
+            "✅ <b>Советы:</b>\n"
+            "• Используй активные глаголы\n"
+            "• Указывай конкретные достижения\n"
+            "• Адаптируй под каждую вакансию\n"
+            "• Проверяй орфографию\n"
+            "• Оптимальный размер: 1-2 страницы\n\n"
+            "❌ <b>Чего избегать:</b>\n"
+            "• Фото (если не требуется)\n"
+            "• Личная информация (возраст, семейное положение)\n"
+            "• Слишком длинные описания\n"
+            "• Шрифты меньше 11pt",
+            reply_markup=back_kb,
+            parse_mode="HTML"
+        )
+
+    @dp.callback_query(F.data == "useful_sites")
+    async def show_useful_sites(callback: types.CallbackQuery):
+        # Создаем инлайн клавиатуру с кнопкой "Назад"
+        back_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад к полезному", callback_data="back_to_useful")]
+        ])
+
+        await callback.message.edit_text(
+            "🔗 <b>Полезные сайты для карьеры:</b>\n\n"
+            "💼 <b>Поиск работы:</b>\n"
+            "• hh.ru - крупнейший портал вакансий\n"
+            "• superjob.ru - популярная площадка\n"
+            "• rabota.ru - поиск по регионам\n"
+            "• linkedin.com - международная сеть\n"
+            "• glassdoor.com - отзывы о компаниях\n\n"
+            "🎓 <b>Обучение:</b>\n"
+            "• coursera.org - онлайн курсы\n"
+            "• udemy.com - практические курсы\n"
+            "• skillbox.ru - IT и дизайн\n"
+            "• netology.ru - цифровые профессии\n"
+            "• stepik.org - бесплатные курсы\n\n"
+            "📊 <b>Профессиональное развитие:</b>\n"
+            "• habr.com - IT-сообщество\n"
+            "• vc.ru - бизнес и стартапы\n"
+            "• ted.com - вдохновляющие лекции\n"
+            "• medium.com - статьи экспертов\n\n"
+            "💰 <b>Зарплаты и аналитика:</b>\n"
+            "• zarplata.ru - сравнение зарплат\n"
+            "• trud.com - статистика по профессиям",
+            reply_markup=back_kb,
+            parse_mode="HTML"
+        )
+
     @dp.message(CareerStates.main_menu)
     async def handle_main_menu(message: types.Message, state: FSMContext):
         text = message.text
@@ -41,11 +105,9 @@ def register_handlers(dp, bot):
             await show_about(message, state)
 
     async def show_profile(message: types.Message, state: FSMContext):
-        """Показать личный кабинет"""
         user_id = str(message.from_user.id)
         profile = ProfileService.get_user_profile(user_id)
 
-        # Базовая информация о профиле
         username = message.from_user.first_name or "Пользователь"
         created_date = datetime.fromisoformat(profile["created_at"]).strftime("%d.%m.%Y")
 
@@ -60,7 +122,6 @@ def register_handlers(dp, bot):
             parse_mode="HTML"
         )
 
-    # Callbacks для личного кабинета
     @dp.callback_query(F.data == "profile_results")
     async def show_profile_results(callback: types.CallbackQuery):
         user_id = str(callback.from_user.id)
@@ -96,26 +157,34 @@ def register_handlers(dp, bot):
         user_id = str(callback.from_user.id)
         data = await state.get_data()
 
-        # Получаем текущие результаты
         results = data.get("results", [])
         if not results:
             await callback.answer("❌ Нет результатов для добавления")
             return
 
-        # Добавляем первую профессию в избранное
         added = ProfileService.add_to_favorites(user_id, results[0])
 
         if added:
             await callback.answer("⭐ Добавлено в избранное!")
+
+            profile = ProfileService.get_user_profile(user_id)
+            unlocked_achievements = AchievementsService.check_favorites_achievements(
+                user_id, len(profile['favorites'])
+            )
+
+            for achievement in unlocked_achievements:
+                achievement_text = AchievementsService.format_achievement_notification(achievement)
+                await callback.message.answer(achievement_text, parse_mode="HTML")
         else:
             await callback.answer("📝 Уже в избранном")
 
-    # Обновляем сохранение результатов классического теста
     async def show_classic_results(message: types.Message, state: FSMContext):
         data = await state.get_data()
-        professions = get_profession_by_preferences(
-            data["audience"], data["interest"],
-            data["with_people"], data["risk"]
+        professions = professions_service.get_professions_by_preferences(
+            audience=data["audience"], 
+            category=data["interest"],
+            with_people=data["with_people"], 
+            risk=data["risk"]
         )
 
         if not professions:
@@ -124,7 +193,6 @@ def register_handlers(dp, bot):
 
         await state.update_data(results=professions)
 
-        # НОВОЕ: Сохраняем в профиль
         user_id = str(message.from_user.id)
         ProfileService.save_test_result(user_id, "classic", professions, data)
 
@@ -157,7 +225,6 @@ def register_handlers(dp, bot):
             await typing_message.delete()
             await state.update_data(ai_recommendations=recommendations)
 
-            # НОВОЕ: Сохраняем ИИ-сессию в профиль
             user_id = str(message.from_user.id)
             ProfileService.save_ai_session(user_id, data)
 
@@ -280,20 +347,16 @@ def register_handlers(dp, bot):
             await generate_ai_recommendations(message, state)
             return
 
-        # Отправляем сообщение пользователя в ИИ
         typing_message = await message.answer("🤖 Думаю над ответом...")
 
         try:
             data = await state.get_data()
             context = data.get("ai_context", [])
 
-            # Добавляем сообщение пользователя в контекст
             context.append({"role": "user", "content": message.text})
 
-            # Получаем ответ от ИИ
             ai_response = await get_ai_career_recommendation(context, mode="chat")
 
-            # Добавляем ответ ИИ в контекст
             context.append({"role": "assistant", "content": ai_response})
 
             await state.update_data(ai_context=context)
@@ -327,12 +390,10 @@ def register_handlers(dp, bot):
                 )
                 return
 
-            # Получаем рекомендации от ИИ
             recommendations = await get_ai_career_recommendation(context, mode="recommend")
 
             await typing_message.delete()
 
-            # Сохраняем результаты
             await state.update_data(ai_recommendations=recommendations)
 
             await message.answer(
@@ -350,8 +411,9 @@ def register_handlers(dp, bot):
                 reply_markup=get_mode_selection_kb(False)
             )
 
-    # Классические обработчики (без изменений)
     async def start_test(message: types.Message, state: FSMContext):
+        await state.update_data(test_start_time=datetime.now().isoformat())
+        
         await message.answer(
             "📋 <b>Карьерный тест</b>\n\n"
             "Отвечу на 4 вопроса и получи персональные рекомендации!\n\n"
@@ -386,14 +448,16 @@ def register_handlers(dp, bot):
         )
 
     async def show_about(message: types.Message, state: FSMContext):
-        stats = get_profession_stats()
+        stats = professions_service.get_profession_stats()
         ai_status = "✅ Активен" if await is_openai_available() else "❌ Недоступен"
+
+        it_count = stats.get('categories', {}).get('💻 IT', 0)
 
         await message.answer(
             f"ℹ️ <b>О боте</b>\n\n"
-            f"🤖 Карьерный Советник v3.0\n"
+            f"🤖 Карьерный Советник v2.0\n"
             f"📊 Профессий в базе: {stats['total']}\n"
-            f"💻 IT-профессий: {stats['it_count']}\n"
+            f"💻 IT-профессий: {it_count}\n"
             f"🚀 Растущих сфер: {stats['high_growth']}\n"
             f"👥 Для работы с людьми: {stats['with_people']}\n"
             f"🧠 ИИ-консультант: {ai_status}\n\n"
@@ -401,22 +465,21 @@ def register_handlers(dp, bot):
             parse_mode="HTML"
         )
 
-    # Callbacks для топ профессий
     @dp.callback_query(F.data.startswith("top_"))
     async def handle_top_categories(callback: types.CallbackQuery):
         category = callback.data.split("_")[1]
 
         if category == "growth":
-            profs = [p for p in PROFESSIONS if "🚀" in p["growth"]][:5]
+            profs = [p for p in professions_service.get_all_professions() if "🚀" in p["growth"]][:5]
             title = "🚀 Быстрорастущие профессии"
         elif category == "people":
-            profs = [p for p in PROFESSIONS if p["with_people"]][:5]
+            profs = [p for p in professions_service.get_all_professions() if p["with_people"]][:5]
             title = "👥 Профессии для работы с людьми"
         elif category == "it":
-            profs = [p for p in PROFESSIONS if p["category"] == "💻 IT"][:5]
+            profs = professions_service.get_professions_by_category("💻 IT")[:5]
             title = "💻 IT-профессии"
         elif category == "creative":
-            profs = [p for p in PROFESSIONS if p["category"] == "🎨 Искусство"][:5]
+            profs = professions_service.get_professions_by_category("🎨 Искусство")[:5]
             title = "🎨 Творческие профессии"
 
         text = f"<b>{title}</b>\n\n"
@@ -429,17 +492,18 @@ def register_handlers(dp, bot):
     @dp.callback_query(F.data.startswith("salary_"))
     async def handle_salary_filter(callback: types.CallbackQuery):
         filter_type = callback.data.split("_")[1]
+        all_professions = professions_service.get_all_professions()
 
         if filter_type == "50":
-            filtered = [p for p in PROFESSIONS if "80,000" in p["salary"] or "100,000" in p["salary"] or "120,000" in p[
+            filtered = [p for p in all_professions if "80,000" in p["salary"] or "100,000" in p["salary"] or "120,000" in p[
                 "salary"] or "нет ограничений" in p["salary"]]
         elif filter_type == "80":
-            filtered = [p for p in PROFESSIONS if
+            filtered = [p for p in all_professions if
                         "100,000" in p["salary"] or "120,000" in p["salary"] or "нет ограничений" in p["salary"]]
         elif filter_type == "100":
-            filtered = [p for p in PROFESSIONS if "120,000" in p["salary"] or "нет ограничений" in p["salary"]]
+            filtered = [p for p in all_professions if "120,000" in p["salary"] or "нет ограничений" in p["salary"]]
         else:  # all
-            filtered = sorted(PROFESSIONS, key=lambda x: x["salary"], reverse=True)[:6]
+            filtered = sorted(all_professions, key=lambda x: x["salary"], reverse=True)[:6]
 
         text = f"💰 <b>Высокооплачиваемые профессии</b>\n\n"
         for i, prof in enumerate(filtered[:5], 1):
@@ -451,6 +515,10 @@ def register_handlers(dp, bot):
 
     @dp.callback_query(F.data.startswith("job_tips"))
     async def show_job_tips(callback: types.CallbackQuery):
+        back_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад к полезному", callback_data="back_to_useful")]
+        ])
+
         tips = [
             "🎯 Определи свои сильные стороны",
             "📝 Составь качественное резюме",
@@ -465,10 +533,14 @@ def register_handlers(dp, bot):
             text += f"• {tip}\n"
         text += "\n🚀 Главное - не сдавайся!"
 
-        await callback.message.edit_text(text, parse_mode="HTML")
+        await callback.message.edit_text(text, reply_markup=back_kb, parse_mode="HTML")
 
     @dp.callback_query(F.data == "free_courses")
     async def show_free_courses(callback: types.CallbackQuery):
+        back_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад к полезному", callback_data="back_to_useful")]
+        ])
+
         await callback.message.edit_text(
             "🎓 <b>Бесплатные курсы:</b>\n\n"
             "💻 <b>Программирование:</b>\n"
@@ -484,6 +556,7 @@ def register_handlers(dp, bot):
             "📊 <b>Аналитика:</b>\n"
             "• Google Analytics Academy\n"
             "• Coursera Data Science",
+            reply_markup=back_kb,
             parse_mode="HTML"
         )
 
@@ -548,9 +621,11 @@ def register_handlers(dp, bot):
 
     async def show_classic_results(message: types.Message, state: FSMContext):
         data = await state.get_data()
-        professions = get_profession_by_preferences(
-            data["audience"], data["interest"],
-            data["with_people"], data["risk"]
+        professions = professions_service.get_professions_by_preferences(
+            audience=data["audience"], 
+            category=data["interest"],
+            with_people=data["with_people"], 
+            risk=data["risk"]
         )
 
         if not professions:
@@ -559,13 +634,30 @@ def register_handlers(dp, bot):
 
         await state.update_data(results=professions)
 
-        # ИСПРАВЛЕНИЕ: Сохраняем результат классического теста
         user_id = str(message.from_user.id)
         try:
             ProfileService.save_test_result(user_id, "classic", professions, data)
             print(f"✅ Классический тест сохранен для пользователя {user_id}")
         except Exception as e:
             print(f"❌ Ошибка сохранения классического теста: {e}")
+
+        profile = ProfileService.get_user_profile(user_id)
+        unlocked_achievements = AchievementsService.check_test_achievements(
+            user_id, profile['stats']['total_tests']
+        )
+
+        test_time = datetime.now()
+        test_duration = data.get('test_start_time')
+        if test_duration:
+            duration = int((test_time - datetime.fromisoformat(test_duration)).total_seconds())
+        else:
+            duration = None
+            
+        special_achievements = AchievementsService.check_special_achievements(
+            user_id, test_time, duration
+        )
+        
+        unlocked_achievements.extend(special_achievements)
 
         result_text = f"🎉 <b>Твои идеальные профессии:</b>\n\n"
         for i, prof in enumerate(professions[:2], 1):
@@ -574,7 +666,13 @@ def register_handlers(dp, bot):
             result_text += f"📋 {prof['desc']}\n\n"
 
         await message.answer(result_text, reply_markup=get_final_kb(), parse_mode="HTML")
+
+        for achievement in unlocked_achievements:
+            achievement_text = AchievementsService.format_achievement_notification(achievement)
+            await message.answer(achievement_text, parse_mode="HTML")
+        
         await state.set_state(CareerStates.show_results)
+
 
     async def generate_ai_recommendations(message: types.Message, state: FSMContext):
         typing_message = await message.answer("🤖 Анализирую нашу беседу и подбираю профессии...")
@@ -595,10 +693,8 @@ def register_handlers(dp, bot):
             await typing_message.delete()
             await state.update_data(ai_recommendations=recommendations)
 
-            # ИСПРАВЛЕНИЕ: Сохраняем ИИ-сессию
             user_id = str(message.from_user.id)
             try:
-                # Подготавливаем данные сессии
                 session_data = {
                     "context": context,
                     "recommendations": recommendations,
@@ -609,11 +705,20 @@ def register_handlers(dp, bot):
             except Exception as e:
                 print(f"❌ Ошибка сохранения ИИ-сессии: {e}")
 
+            profile = ProfileService.get_user_profile(user_id)
+            unlocked_achievements = AchievementsService.check_ai_achievements(
+                user_id, profile['stats']['ai_consultations']
+            )
+
             await message.answer(
                 f"🎉 <b>Персональные рекомендации от ИИ:</b>\n\n{recommendations}",
                 reply_markup=get_ai_results_kb(),
                 parse_mode="HTML"
             )
+
+            for achievement in unlocked_achievements:
+                achievement_text = AchievementsService.format_achievement_notification(achievement)
+                await message.answer(achievement_text, parse_mode="HTML")
 
             await state.set_state(CareerStates.show_results)
 
@@ -703,7 +808,7 @@ def register_handlers(dp, bot):
 
     @dp.message(Command("stats"))
     async def cmd_stats(message: types.Message):
-        stats = get_profession_stats()
+        stats = professions_service.get_profession_stats()
         users_online = random.randint(45, 89)
         tests_today = random.randint(120, 250)
         ai_requests = random.randint(50, 150)
@@ -729,3 +834,67 @@ def register_handlers(dp, bot):
                 "🤔 Не понимаю... Используй /start для начала работы!",
                 reply_markup=get_main_menu_kb()
             )
+
+    @dp.callback_query(F.data == "back_to_useful")
+    async def back_to_useful_menu(callback: types.CallbackQuery):
+        await callback.message.edit_text(
+            "📚 <b>Полезная информация</b>\n\n"
+            "Что тебя интересует?",
+            reply_markup=get_useful_kb(),
+            parse_mode="HTML"
+        )
+
+    @dp.callback_query(F.data == "back_to_profile")
+    async def back_to_profile_menu(callback: types.CallbackQuery):
+        user_id = str(callback.from_user.id)
+        profile = ProfileService.get_user_profile(user_id)
+        
+        profile_text = f"""👤 <b>Личный кабинет - {callback.from_user.first_name}</b>
+
+📅 С нами с: {datetime.fromisoformat(profile['created_at']).strftime('%d.%m.%Y')}
+🎯 Тестов пройдено: {profile['stats']['total_tests']}
+🤖 ИИ-консультаций: {profile['stats']['ai_consultations']}
+⭐ Избранных профессий: {len(profile['favorites'])}
+
+Выбери действие:"""
+
+        await callback.message.edit_text(
+            profile_text,
+            reply_markup=get_profile_kb(),
+            parse_mode="HTML"
+        )
+
+    @dp.callback_query(F.data == "profile_achievements")
+    async def show_profile_achievements(callback: types.CallbackQuery):
+        user_id = str(callback.from_user.id)
+
+        achievements = AchievementsService.get_user_achievements(user_id)
+        stats = AchievementsService.get_achievements_stats(user_id)
+
+        achievements_text = AchievementsService.format_achievements_list(achievements)
+
+        stats_text = f"\n📊 <b>Статистика достижений:</b>\n"
+        stats_text += f"🏆 Всего достижений: {stats['total_achievements']}\n"
+        
+        if stats['categories']:
+            stats_text += f"📂 Категории:\n"
+            for category, count in stats['categories'].items():
+                stats_text += f"   • {category}: {count}\n"
+        
+        if stats['last_achievement']:
+            last_date = datetime.fromisoformat(stats['last_achievement']['unlocked_at']).strftime("%d.%m.%Y")
+            stats_text += f"\n🎉 Последнее достижение:\n"
+            stats_text += f"   {stats['last_achievement']['icon']} {stats['last_achievement']['name']}\n"
+            stats_text += f"   📅 {last_date}"
+        
+        full_text = achievements_text + stats_text
+
+        back_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад к профилю", callback_data="back_to_profile")]
+        ])
+        
+        await callback.message.edit_text(
+            full_text,
+            reply_markup=back_kb,
+            parse_mode="HTML"
+        )
